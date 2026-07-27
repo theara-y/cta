@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chicago CTA Transit Tracker</title>
+  <style>
+    /* 1. Global Reset & Base Styling */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f4f6f9;
+      color: #333;
+      line-height: 1.5;
+    }
+
+    /* 2. Header and Controls */
+    header {
+      background-color: #111;
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+      border-bottom: 4px solid #15aabf;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+    select, button {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: none;
+      outline: none;
+    }
+    select {
+      background-color: #fff;
+      color: #333;
+      cursor: pointer;
+    }
+    button {
+      background-color: #15aabf;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    button:hover {
+      background-color: #0c8599;
+    }
+
+    /* 3. Results Container */
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 0 16px;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      margin-bottom: 20px;
+    }
+    #stop-name {
+      font-size: 1.25rem;
+      color: #111;
+    }
+    #stop-distance {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    /* 4. Live Updates List Layout */
+    h3 {
+      margin-top: 15px;
+      font-size: 1.1rem;
+      color: #444;
+      border-bottom: 2px solid #eee;
+      padding-bottom: 6px;
+    }
+    #arrivals-list {
+      list-style: none;
+      margin-top: 12px;
+    }
+    #arrivals-list li {
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      font-weight: 500;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .train-item {
+      background-color: #e2f0fe;
+      border-left: 5px solid #007bff;
+    }
+    .bus-item {
+      background-color: #eafaf1;
+      border-left: 5px solid #28a745;
+    }
+    .approaching {
+      color: #dc3545;
+      font-weight: bold;
+      animation: blink 1.5s infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="controls">
+      <h1>Chicago CTA Transit Finder</h1>
+      <select id="direction-toggle">
+        <option value="north_east">North / East Side Filters</option>
+        <option value="south_west" selected>South / West Side Filters</option>
+      </select>
+      <button id="locate-btn">🚌 Find Nearest Stop & Arrivals</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h2 id="stop-name">Tap the button above to request location</h2>
+      <p id="stop-distance"></p>
+      
+      <h3>Live Arrivals Countdown</h3>
+      <ul id="arrivals-list">
+        <li style="background: #eee; border-left: 5px solid #aaa;">No stop tracked yet.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // Replace with your real registration tokens from the official CTA Developer Portal
+    const TRAIN_API_KEY = "YOUR_CTA_TRAIN_API_KEY";
+    const BUS_API_KEY = "YOUR_CTA_BUS_API_KEY";
+
+    // Comprehensive catalog matching real-world CTA ID tokens to coordinates
+    const ctaTransitDatabase = [
+      // SOUTH / WEST REGION STOPS
+      { name: "35th/Archer Station (Orange Line)", lat: 41.8294, lon: -87.6806, ctaId: "40120", type: "train", zone: "south_west" },
+      { name: "Midway Station Terminal (Orange Line)", lat: 41.7866, lon: -87.7379, ctaId: "40930", type: "train", zone: "south_west" },
+      { name: "Archer & Damen Terminal Stop (Bus 62)", lat: 41.8311, lon: -87.6752, ctaId: "8674", type: "bus", zone: "south_west" },
+      { name: "Western & 35th St Stop (Bus 49)", lat: 41.8300, lon: -87.6853, ctaId: "8131", type: "bus", zone: "south_west" },
+
+      // NORTH / EAST REGION STOPS
+      { name: "Fullerton Station (Red/Brown/Purple Lines)", lat: 41.9250, lon: -87.6528, ctaId: "41220", type: "train", zone: "north_east" },
+      { name: "Belmont Station (Red/Brown/Purple Lines)", lat: 41.9395, lon: -87.6534, ctaId: "41320", type: "train", zone: "north_east" },
+      { name: "Clark & Fullerton Intersection Stop (Bus 22)", lat: 41.9252, lon: -87.6415, ctaId: "1724", type: "bus", zone: "north_east" }
+    ];
+
+    // Mathematical formula calculating distance via earth curve coordinates
+    function getHaversineDistance(lat1, lon1, lat2, lon2) {
+      const R = 3959; // Earth radius miles
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+    }
+
+    // Iterates matching parameters to isolate the minimum distance index
+    function evaluateClosestStop(userLat, userLon, selectedZone) {
+      let matchedStop = null;
+      let minimumDistance = Infinity;
+
+      const filteredStops = ctaTransitDatabase.filter(stop => stop.zone === selectedZone);
+
+      filteredStops.forEach(stop => {
+        const distance = getHaversineDistance(userLat, userLon, stop.lat, stop.lon);
+        if (distance < minimumDistance) {
+          minimumDistance = distance;
+          matchedStop = stop;
+        }
+      });
+      return { stop: matchedStop, distance: minimumDistance };
+    }
+
+    // Handles parallel api requests wrapped around a proxy configuration layer
+    async function loadLivePredictions(stopObject) {
+      const list = document.getElementById('arrivals-list');
+      list.innerHTML = "<li>Fetching live tracker data...</li>";
+
+      let targetUrl = "";
+      if (stopObject.type === "train") {
+        targetUrl = `https://transitchicago.com{TRAIN_API_KEY}&mapid=${stopObject.ctaId}&outputType=JSON`;
+      } else {
+        targetUrl = `https://transitchicago.com{BUS_API_KEY}&stpid=${stopObject.ctaId}&format=json`;
+      }
+
+      // CORS proxy wrapper to protect local browser network environment execution loops
+      const proxyUrl = `https://corsproxy.io?` + encodeURIComponent(targetUrl);
+
+      try {
+        const res = await fetch(proxyUrl);
+        const data = await res.json();
+        list.innerHTML = ""; 
+
+        if (stopObject.type === "train") {
+          processTrainData(data, list);
+        } else {
+          processBusData(data, list);
+        }
+      } catch (err) {
+        list.innerHTML = `<li style="color:red; background:#fce8e6;">API Connection Fail: ${err.message}</li>`;
+      }
+    }
+
+    function processTrainData(data, targetContainer) {
+      const etas = data.ctatt?.eta;
+      if (!etas || etas.length === 0) {
+        targetContainer.innerHTML = "<li>No upcoming trains scheduled right now.</li>";
+        return;
+      }
+      etas.slice(0, 4).forEach(eta => {
+        const mins = Math.round((new Date(eta.arrT) - new Date(eta.prdt)) / 60000);
+        const item = document.createElement('li');
+        item.className = "train-item";
+        
+        const timeDisplay = mins <= 1 ? `<span class="approaching">Due 🚨</span>` : `<span>${mins} mins</span>`;
+        item.innerHTML = `<div>🚂 <strong>[${eta.rt} Line]</strong> to ${eta.destNm}</div> ${timeDisplay}`;
+        targetContainer.appendChild(item);
+      });
+    }
+
+    function processBusData(data, targetContainer) {
+      const prds = data["bustime-response"]?.prd;
+      if (!prds || prds.length === 0) {
+        targetContainer.innerHTML = "<li>No active buses running on this route configuration.</li>";
+        return;
+      }
+      prds.slice(0, 4).forEach(prd => {
+        const item = document.createElement('li');
+        item.className = "bus-item";
+
+        const timeDisplay = prd.prdctdn === "DUE" ? `<span class="approaching">Due 🚨</span>` : `<span>${prd.prdctdn} mins</span>`;
+        item.innerHTML = `<div>🚌 <strong>[Route ${prd.rt}]</strong> to ${prd.des}</div> ${timeDisplay}`;
+        targetContainer.appendChild(item);
+      });
+    }
+
+    // Geolocation Core Interaction Button Wire Link Setup
+    document.getElementById('locate-btn').addEventListener('click', () => {
+      if (!navigator.geolocation) return alert("Geolocation not supported by this browser.");
+
+      const chosenZone = document.getElementById('direction-toggle').value;
+      document.getElementById('stop-name').textContent = "Scanning matching coordinates...";
+      document.getElementById('stop-distance').textContent = "";
+
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const { latitude, longitude } = pos.coords;
+        const trackingResult = evaluateClosestStop(latitude, longitude, chosenZone);
+
+        if (trackingResult.stop) {
+          document.getElementById('stop-name').textContent = trackingResult.stop.name;
+          document.getElementById('stop-distance').textContent = `Distance: ${trackingResult.distance.toFixed(2)} miles away (${chosenZone === 'north_east' ? 'North/East' : 'South/West'} Filter)`;
+          loadLivePredictions(trackingResult.stop);
+        } else {
+          document.getElementById('stop-name').textContent = "No database matches inside this zone.";
+        }
+      }, (err) => {
+        document.getElementById('stop-name').textContent = "Location Request Denied";
